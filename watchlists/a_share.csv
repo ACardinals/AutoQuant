@@ -1,0 +1,13 @@
+symbol,name,market,csv
+000001.SZ,平安银行,银行,..\data\a_share\000001.SZ.csv
+600519.SH,贵州茅台,白酒消费,..\data\a_share\600519.SH.csv
+300750.SZ,宁德时代,新能源电池,..\data\a_share\300750.SZ.csv
+600036.SH,招商银行,银行,..\data\a_share\600036.SH.csv
+601318.SH,中国平安,保险,..\data\a_share\601318.SH.csv
+600030.SH,中信证券,券商,..\data\a_share\600030.SH.csv
+601899.SH,紫金矿业,有色金属,..\data\a_share\601899.SH.csv
+600276.SH,恒瑞医药,医药,..\data\a_share\600276.SH.csv
+000858.SZ,五粮液,白酒消费,..\data\a_share\000858.SZ.csv
+002594.SZ,比亚迪,新能源车,..\data\a_share\002594.SZ.csv
+601088.SH,中国神华,能源,..\data\a_share\601088.SH.csv
+688981.SH,中芯国际,半导体,..\data\a_share\688981.SH.csv

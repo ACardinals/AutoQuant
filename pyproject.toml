@@ -1,0 +1,23 @@
+[project]
+name = "market-monitor"
+version = "0.1.0"
+description = "Market monitoring, strategy screening, and backtesting for crypto and A-share research."
+requires-python = ">=3.11"
+dependencies = [
+    "akshare>=1.16.0",
+    "plotly>=6.0.0",
+    "requests>=2.31.0",
+    "streamlit>=1.40.0",
+]
+
+[project.scripts]
+market-monitor = "market_monitor.cli:main"
+market-monitor-dashboard = "market_monitor.dashboard:main"
+
+[tool.setuptools.packages.find]
+include = ["market_monitor*"]
+exclude = ["data*", "watchlists*", "tests*"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

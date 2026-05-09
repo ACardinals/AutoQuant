@@ -16,6 +16,7 @@ from market_monitor.data.watchlist import (
     load_watchlist_candles,
     sync_watchlist_paths,
 )
+from market_monitor.evaluation import compare_strategies, format_strategy_comparison_table
 from market_monitor.rl.baselines import available_policies, create_policy, evaluate_policy
 from market_monitor.rl.environment import TradingEnvironmentConfig, TradingEnvironmentPlaceholder
 from market_monitor.signals.formatters import format_signal_table, signal_with_metadata
@@ -64,6 +65,13 @@ def main() -> None:
     sync_parser.add_argument("--data-dir", default="data/a_share")
     sync_parser.add_argument("--market", default="A股")
 
+    compare_parser = subparsers.add_parser("compare-strategies", help="Compare strategies on the same local CSV candles")
+    compare_parser.add_argument("--csv", required=True)
+    compare_parser.add_argument("--symbol", required=True)
+    compare_parser.add_argument("--strategy", action="append", help="Strategy name to include; repeat to compare a subset")
+    compare_parser.add_argument("--initial-cash", type=float, default=10_000.0)
+    compare_parser.add_argument("--format", choices=("json", "table"), default="json")
+
     subparsers.add_parser("strategies", help="List available strategy names")
 
     rl_baseline_parser = subparsers.add_parser("rl-baseline", help="Evaluate a simple RL baseline policy on local CSV candles")
@@ -91,6 +99,15 @@ def main() -> None:
 
     if args.command == "rl-spec":
         print(json.dumps(TradingEnvironmentPlaceholder().describe(), ensure_ascii=False, indent=2))
+        return
+
+    if args.command == "compare-strategies":
+        candles = load_candles_from_csv(args.csv, symbol=args.symbol)
+        rows = compare_strategies(candles, args.strategy, args.initial_cash)
+        if args.format == "table":
+            print(format_strategy_comparison_table(rows))
+        else:
+            print(json.dumps(rows, ensure_ascii=False, indent=2))
         return
 
     if args.command == "strategies":

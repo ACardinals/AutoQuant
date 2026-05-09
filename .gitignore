@@ -11,3 +11,6 @@ dist/
 .coverage
 htmlcov/
 .streamlit/secrets.toml
+
+# Generated local market data. Keep small reproducible samples under examples/data/.
+data/a_share/*.csv

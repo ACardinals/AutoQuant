@@ -22,6 +22,8 @@ from market_monitor.evaluation import (
     format_strategy_comparison_table,
     format_watchlist_comparison_table,
 )
+from market_monitor.ml.models import available_models
+from market_monitor.ml.validation import evaluate_time_series_model, format_ml_evaluation_table
 from market_monitor.rl.baselines import available_policies, create_policy, evaluate_policy
 from market_monitor.rl.environment import TradingEnvironmentConfig, TradingEnvironmentPlaceholder
 from market_monitor.signals.formatters import format_signal_table, signal_with_metadata
@@ -84,6 +86,15 @@ def main() -> None:
     watchlist_compare_parser.add_argument("--format", choices=("json", "table"), default="json")
     watchlist_compare_parser.add_argument("--top", type=int, help="Limit output to the top N rows")
 
+    ml_parser = subparsers.add_parser("ml-evaluate", help="Evaluate a supervised ML baseline with time-series splits")
+    ml_parser.add_argument("--csv", required=True)
+    ml_parser.add_argument("--symbol", required=True)
+    ml_parser.add_argument("--model", choices=available_models(), default="hist_gradient_boosting")
+    ml_parser.add_argument("--horizon", type=int, default=10)
+    ml_parser.add_argument("--splits", type=int, default=5)
+    ml_parser.add_argument("--threshold", type=float, default=0.0)
+    ml_parser.add_argument("--format", choices=("json", "table"), default="json")
+
     subparsers.add_parser("strategies", help="List available strategy names")
 
     rl_baseline_parser = subparsers.add_parser("rl-baseline", help="Evaluate a simple RL baseline policy on local CSV candles")
@@ -131,6 +142,15 @@ def main() -> None:
             print(format_watchlist_comparison_table(rows))
         else:
             print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return
+
+    if args.command == "ml-evaluate":
+        candles = load_candles_from_csv(args.csv, symbol=args.symbol)
+        result = evaluate_time_series_model(candles, args.model, args.horizon, args.splits, args.threshold)
+        if args.format == "table":
+            print(format_ml_evaluation_table(result))
+        else:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
         return
 
     if args.command == "strategies":

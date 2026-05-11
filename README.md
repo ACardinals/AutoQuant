@@ -88,6 +88,20 @@ python -m market_monitor.cli compare-watchlist \
 
 The `score` field is a deterministic research ranking score based on return, drawdown, win rate, profit factor, average trade return, and trade-count sanity checks. It is only for prioritizing further research.
 
+Evaluate a supervised ML baseline with time-series splits:
+
+```bash
+python -m market_monitor.cli ml-evaluate \
+  --csv examples/data/a_share/000001.SZ.csv \
+  --symbol 000001.SZ \
+  --model hist_gradient_boosting \
+  --horizon 10 \
+  --splits 5 \
+  --format table
+```
+
+The ML workflow uses `TimeSeriesSplit` instead of random K-fold to reduce time-series leakage. Start with `logistic_regression` for interpretability, then compare `random_forest` and `hist_gradient_boosting` for stronger tabular baselines.
+
 Evaluate an RL baseline policy:
 
 ```bash

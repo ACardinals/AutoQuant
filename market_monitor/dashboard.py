@@ -7,6 +7,9 @@ import os
 from market_monitor.backtest.engine import LongOnlyBacktester
 from market_monitor.data.akshare_a_share import download_a_share_watchlist, fetch_a_share_spot_universe
 from market_monitor.data.watchlist import WatchlistItem, load_watchlist, load_watchlist_candles, write_watchlist
+from market_monitor.evaluation import compare_strategies, compare_watchlist
+from market_monitor.ml.models import available_models
+from market_monitor.ml.validation import evaluate_time_series_model
 from market_monitor.models import Candle
 from market_monitor.signals.formatters import signal_with_metadata
 from market_monitor.signals.screener import screen_watchlist
@@ -197,6 +200,38 @@ def backtest_symbol(
     }
 
 
+
+def compare_symbol_strategies(
+    watchlist_path: str | Path,
+    symbol: str,
+    initial_cash: float = 10_000.0,
+) -> list[dict]:
+    _, candles_by_symbol, _ = load_available_watchlist_candles(watchlist_path)
+    return compare_strategies(candles_by_symbol[symbol.upper()], initial_cash=initial_cash)
+
+
+def compare_watchlist_strategies(
+    watchlist_path: str | Path,
+    initial_cash: float = 10_000.0,
+    top_n: int | None = 20,
+) -> list[dict]:
+    items, candles_by_symbol, _ = load_available_watchlist_candles(watchlist_path)
+    rows = compare_watchlist(items, candles_by_symbol, initial_cash=initial_cash)
+    return rows[:top_n] if top_n is not None and top_n > 0 else rows
+
+
+def evaluate_symbol_ml(
+    watchlist_path: str | Path,
+    symbol: str,
+    model_name: str,
+    horizon: int,
+    splits: int,
+    threshold: float,
+) -> dict:
+    _, candles_by_symbol, _ = load_available_watchlist_candles(watchlist_path)
+    return evaluate_time_series_model(candles_by_symbol[symbol.upper()], model_name, horizon, splits, threshold)
+
+
 def candles_to_chart_rows(candles: list[Candle]) -> list[dict]:
     return [
         {
@@ -359,7 +394,7 @@ def main() -> None:
     )
     _render_summary_metrics(st, rows, filtered_rows, config["strategy_name"], status)
 
-    tabs = st.tabs(["策略筛选", "个股K线", "回测分析"])
+    tabs = st.tabs(["策略筛选", "个股K线", "回测分析", "策略对比", "股票池评分", "ML评估"])
     with tabs[0]:
         _render_screening_tab(st, filtered_rows)
         if filtered_rows:
@@ -391,6 +426,12 @@ def main() -> None:
         _render_symbol_detail_tab(st, selected_label, details["candles"])
     with tabs[2]:
         _render_backtest_tab(st, details["backtest"])
+    with tabs[3]:
+        _render_strategy_comparison_tab(st, path, selected_label, selected_symbol, config["initial_cash"])
+    with tabs[4]:
+        _render_watchlist_score_tab(st, path, config["initial_cash"], config["score_top_n"])
+    with tabs[5]:
+        _render_ml_evaluation_tab(st, path, selected_label, selected_symbol, config)
 
 
 def _render_css(st) -> None:
@@ -447,6 +488,11 @@ def _render_sidebar(st) -> dict:
         min_confidence = st.slider("最低置信度", min_value=0.0, max_value=1.0, value=0.0, step=0.05)
         max_symbols = st.number_input("最多下载股票数（0为全部）", min_value=0, value=50, step=10)
         universe_limit = st.number_input("生成股票池上限（0为全部）", min_value=0, value=0, step=100)
+        score_top_n = st.number_input("股票池评分Top N", min_value=1, value=20, step=5)
+        selected_ml_model = st.selectbox("ML模型", available_models(), index=available_models().index("hist_gradient_boosting"))
+        ml_horizon = st.number_input("ML预测周期", min_value=1, value=10, step=1)
+        ml_splits = st.number_input("ML时间切分数", min_value=2, value=5, step=1)
+        ml_threshold = st.number_input("ML收益阈值", value=0.0, step=0.005, format="%.4f")
 
         st.divider()
         if st.button("创建示例股票池", use_container_width=True):
@@ -482,6 +528,11 @@ def _render_sidebar(st) -> dict:
         "signal_filter": _signal_value_from_label(signal_filter),
         "search_text": search_text,
         "min_confidence": min_confidence,
+        "score_top_n": int(score_top_n),
+        "ml_model": selected_ml_model,
+        "ml_horizon": int(ml_horizon),
+        "ml_splits": int(ml_splits),
+        "ml_threshold": ml_threshold,
     }
 
 
@@ -574,10 +625,67 @@ def _render_backtest_tab(st, backtest: dict) -> None:
         st.info("No trades recorded.")
 
 
+def _render_strategy_comparison_tab(st, watchlist_path: str | Path, selected_label: str, selected_symbol: str, initial_cash: float) -> None:
+    st.subheader(f"{selected_label} 策略对比")
+    st.markdown('<div class="section-note">对同一标的运行全部策略，并按综合score排序。</div>', unsafe_allow_html=True)
+    try:
+        with st.spinner("正在比较策略..."):
+            rows = compare_symbol_strategies(watchlist_path, selected_symbol, initial_cash)
+        st.dataframe(rows, use_container_width=True, height=420)
+    except Exception as exc:
+        st.error(f"策略对比失败：{exc}")
+
+
+def _render_watchlist_score_tab(st, watchlist_path: str | Path, initial_cash: float, top_n: int) -> None:
+    st.subheader("股票池策略评分")
+    st.markdown('<div class="section-note">对已下载行情的股票池运行全部策略，展示score最高的标的/策略组合。</div>', unsafe_allow_html=True)
+    try:
+        with st.spinner("正在计算股票池评分..."):
+            rows = compare_watchlist_strategies(watchlist_path, initial_cash, top_n)
+        st.dataframe(rows, use_container_width=True, height=560)
+    except Exception as exc:
+        st.error(f"股票池评分失败：{exc}")
+
+
+def _render_ml_evaluation_tab(st, watchlist_path: str | Path, selected_label: str, selected_symbol: str, config: dict) -> None:
+    st.subheader(f"{selected_label} ML时间序列评估")
+    st.markdown('<div class="section-note">使用TimeSeriesSplit评估监督学习baseline，避免随机K折造成时间泄漏。</div>', unsafe_allow_html=True)
+    st.caption("该结果用于研究特征有效性，不构成交易建议。")
+    try:
+        with st.spinner("正在训练并验证ML模型..."):
+            result = evaluate_symbol_ml(
+                watchlist_path,
+                selected_symbol,
+                config["ml_model"],
+                config["ml_horizon"],
+                config["ml_splits"],
+                config["ml_threshold"],
+            )
+        metrics = result.get("metrics", {})
+        metric_cols = st.columns(5)
+        metric_cols[0].metric("Accuracy", _format_metric(metrics.get("accuracy")))
+        metric_cols[1].metric("Precision", _format_metric(metrics.get("precision")))
+        metric_cols[2].metric("Recall", _format_metric(metrics.get("recall")))
+        metric_cols[3].metric("ROC AUC", _format_metric(metrics.get("roc_auc")))
+        metric_cols[4].metric("样本数", result.get("samples", 0))
+        st.subheader("分折结果 / Fold Results")
+        st.dataframe(result.get("folds", []), use_container_width=True, height=360)
+        with st.expander("特征列 / Feature Columns"):
+            st.write(result.get("feature_columns", []))
+    except Exception as exc:
+        st.error(f"ML评估失败：{exc}")
+
+
 def _format_pct(value) -> str:
     if value is None:
         return "N/A"
     return f"{value:.2f}%"
+
+
+def _format_metric(value) -> str:
+    if value is None:
+        return "N/A"
+    return f"{value:.4f}"
 
 
 if __name__ == "__main__":

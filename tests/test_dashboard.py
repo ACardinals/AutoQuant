@@ -3,10 +3,13 @@ from datetime import datetime, timedelta
 from market_monitor.dashboard import (
     backtest_symbol,
     candles_to_chart_rows,
+    compare_symbol_strategies,
+    compare_watchlist_strategies,
     create_candlestick_figure,
     create_full_a_share_watchlist,
     download_symbols_from_watchlist,
     ensure_default_watchlist,
+    evaluate_symbol_ml,
     filter_screen_rows,
     filter_watchlist_rows,
     flatten_screen_row,
@@ -17,11 +20,13 @@ from market_monitor.dashboard import (
 from market_monitor.models import Candle
 
 
-def _write_candles(path, symbol):
+def _write_candles(path, symbol, count=80):
     rows = ["timestamp,symbol,open,high,low,close,volume"]
-    for i in range(25):
-        price = 100 + i
-        rows.append(f"2024-01-{i + 1:02d}T00:00:00Z,{symbol},{price},{price + 1},{price - 1},{price},{100 + i * 3}")
+    start = datetime(2024, 1, 1)
+    for i in range(count):
+        price = 100 + i * 0.2 + (i % 5) * 0.1
+        day = start + timedelta(days=i)
+        rows.append(f"{day:%Y-%m-%d}T00:00:00Z,{symbol},{price},{price + 1},{price - 1},{price},{100 + i * 3}")
     path.write_text("\n".join(rows), encoding="utf-8")
 
 
@@ -214,3 +219,52 @@ def test_write_filtered_watchlist(tmp_path, monkeypatch):
     text = output.read_text(encoding="utf-8")
     assert "600519.SH" in text
     assert "000001.SZ" not in text
+
+
+def test_compare_symbol_strategies_returns_ranked_rows(tmp_path):
+    csv_path = tmp_path / "test.csv"
+    _write_candles(csv_path, "TEST", count=90)
+    watchlist_path = tmp_path / "watchlist.csv"
+    watchlist_path.write_text(
+        "symbol,name,market,csv\nTEST,Test Asset,unit,test.csv\n",
+        encoding="utf-8",
+    )
+
+    rows = compare_symbol_strategies(watchlist_path, "TEST", 10_000)
+
+    assert rows
+    assert "score" in rows[0]
+    assert rows[0]["score"] >= rows[-1]["score"]
+
+
+def test_compare_watchlist_strategies_returns_metadata(tmp_path):
+    csv_path = tmp_path / "test.csv"
+    _write_candles(csv_path, "TEST", count=90)
+    watchlist_path = tmp_path / "watchlist.csv"
+    watchlist_path.write_text(
+        "symbol,name,market,csv\nTEST,Test Asset,unit,test.csv\n",
+        encoding="utf-8",
+    )
+
+    rows = compare_watchlist_strategies(watchlist_path, 10_000, top_n=3)
+
+    assert rows
+    assert len(rows) <= 3
+    assert rows[0]["symbol"] == "TEST"
+    assert rows[0]["name"] == "Test Asset"
+
+
+def test_evaluate_symbol_ml_returns_metrics(tmp_path):
+    csv_path = tmp_path / "test.csv"
+    _write_candles(csv_path, "TEST", count=90)
+    watchlist_path = tmp_path / "watchlist.csv"
+    watchlist_path.write_text(
+        "symbol,name,market,csv\nTEST,Test Asset,unit,test.csv\n",
+        encoding="utf-8",
+    )
+
+    result = evaluate_symbol_ml(watchlist_path, "TEST", "logistic_regression", horizon=5, splits=3, threshold=0)
+
+    assert result["model"] == "logistic_regression"
+    assert result["folds"]
+    assert "accuracy" in result["metrics"]

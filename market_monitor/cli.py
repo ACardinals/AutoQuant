@@ -25,6 +25,7 @@ from market_monitor.evaluation import (
 from market_monitor.ml.models import available_models
 from market_monitor.ml.prediction import format_ml_rank_table, rank_watchlist_ml
 from market_monitor.ml.validation import evaluate_time_series_model, format_ml_evaluation_table
+from market_monitor.research_export import default_output_dir, export_research_snapshot
 from market_monitor.rl.baselines import available_policies, create_policy, evaluate_policy
 from market_monitor.rl.environment import TradingEnvironmentConfig, TradingEnvironmentPlaceholder
 from market_monitor.signals.formatters import format_signal_table, signal_with_metadata
@@ -104,6 +105,16 @@ def main() -> None:
     ml_rank_parser.add_argument("--top", type=int, default=20)
     ml_rank_parser.add_argument("--format", choices=("json", "table"), default="json")
 
+    export_parser = subparsers.add_parser("export-research", help="Export current watchlist research results to CSV/JSON files")
+    export_parser.add_argument("--watchlist", required=True)
+    export_parser.add_argument("--strategy", default="ma_trend")
+    export_parser.add_argument("--model", choices=available_models(), default="hist_gradient_boosting")
+    export_parser.add_argument("--horizon", type=int, default=10)
+    export_parser.add_argument("--threshold", type=float, default=0.0)
+    export_parser.add_argument("--top", type=int, default=20)
+    export_parser.add_argument("--initial-cash", type=float, default=10_000.0)
+    export_parser.add_argument("--output-dir")
+
     subparsers.add_parser("strategies", help="List available strategy names")
 
     rl_baseline_parser = subparsers.add_parser("rl-baseline", help="Evaluate a simple RL baseline policy on local CSV candles")
@@ -171,6 +182,11 @@ def main() -> None:
             print(json.dumps(rows, ensure_ascii=False, indent=2))
         return
 
+    if args.command == "export-research":
+        summary = _export_research(args)
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return
+
     if args.command == "strategies":
         print(json.dumps(available_strategies(), ensure_ascii=False, indent=2))
         return
@@ -213,6 +229,32 @@ def main() -> None:
             "latest_signal": latest_signal.as_dict(),
         }
         print(json.dumps(output, ensure_ascii=False, indent=2))
+
+
+def _export_research(args):
+    items, candles_by_symbol = load_watchlist_candles(args.watchlist)
+    metadata = {item.symbol: {"name": item.name, "market": item.market} for item in items}
+    strategy = create_strategy(args.strategy)
+    signals = screen_watchlist(candles_by_symbol, strategy)
+    screen_rows = [signal_with_metadata(signal, metadata) for signal in signals]
+    strategy_scores = compare_watchlist(items, candles_by_symbol, initial_cash=args.initial_cash)[: args.top]
+    ai_candidates = rank_watchlist_ml(items, candles_by_symbol, args.model, args.horizon, args.threshold, args.top)
+    output_dir = args.output_dir or default_output_dir()
+    return export_research_snapshot(
+        output_dir,
+        screen_rows,
+        strategy_scores,
+        ai_candidates,
+        {
+            "watchlist": args.watchlist,
+            "strategy": args.strategy,
+            "model": args.model,
+            "horizon": args.horizon,
+            "threshold": args.threshold,
+            "top": args.top,
+            "initial_cash": args.initial_cash,
+        },
+    )
 
 
 def _sync_watchlist(args):

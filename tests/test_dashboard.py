@@ -10,6 +10,7 @@ from market_monitor.dashboard import (
     download_symbols_from_watchlist,
     ensure_default_watchlist,
     evaluate_symbol_ml,
+    export_dashboard_research,
     filter_screen_rows,
     filter_watchlist_rows,
     flatten_screen_row,
@@ -286,3 +287,28 @@ def test_rank_watchlist_ml_candidates_returns_candidates(tmp_path):
     assert rows
     assert rows[0]["symbol"] == "TEST"
     assert "probability" in rows[0]
+
+def test_export_dashboard_research_writes_snapshot(tmp_path):
+    csv_path = tmp_path / "test.csv"
+    _write_candles(csv_path, "TEST", count=90)
+    watchlist_path = tmp_path / "watchlist.csv"
+    watchlist_path.write_text(
+        "symbol,name,market,csv\nTEST,Test Asset,unit,test.csv\n",
+        encoding="utf-8",
+    )
+
+    summary = export_dashboard_research(
+        watchlist_path,
+        "ma_trend",
+        "logistic_regression",
+        horizon=5,
+        threshold=0,
+        top_n=5,
+        initial_cash=10_000,
+        output_dir=tmp_path / "exports",
+    )
+
+    assert (tmp_path / "exports" / "strategy_screen.csv").exists()
+    assert (tmp_path / "exports" / "strategy_scores.csv").exists()
+    assert (tmp_path / "exports" / "ai_candidates.csv").exists()
+    assert summary["output_dir"].endswith("exports")

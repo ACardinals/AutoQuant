@@ -14,3 +14,6 @@ htmlcov/
 
 # Generated local market data. Keep small reproducible samples under examples/data/.
 data/a_share/*.csv
+
+# Generated research snapshots.
+research_outputs/

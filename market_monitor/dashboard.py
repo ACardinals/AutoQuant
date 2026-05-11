@@ -11,6 +11,7 @@ from market_monitor.evaluation import compare_strategies, compare_watchlist
 from market_monitor.ml.models import available_models
 from market_monitor.ml.prediction import rank_watchlist_ml
 from market_monitor.ml.validation import evaluate_time_series_model
+from market_monitor.research_export import default_output_dir, export_research_snapshot
 from market_monitor.models import Candle
 from market_monitor.signals.formatters import signal_with_metadata
 from market_monitor.signals.screener import screen_watchlist
@@ -244,6 +245,40 @@ def rank_watchlist_ml_candidates(
     return rank_watchlist_ml(items, candles_by_symbol, model_name, horizon, threshold, top_n)
 
 
+def export_dashboard_research(
+    watchlist_path: str | Path,
+    strategy_name: str,
+    model_name: str,
+    horizon: int,
+    threshold: float,
+    top_n: int,
+    initial_cash: float,
+    output_dir: str | Path | None = None,
+) -> dict:
+    items, candles_by_symbol, _ = load_available_watchlist_candles(watchlist_path)
+    metadata = {item.symbol: {"name": item.name, "market": item.market} for item in items}
+    strategy = create_strategy(strategy_name)
+    signals = screen_watchlist(candles_by_symbol, strategy)
+    screen_rows = [signal_with_metadata(signal, metadata) for signal in signals]
+    strategy_scores = compare_watchlist(items, candles_by_symbol, initial_cash=initial_cash)[:top_n]
+    ai_candidates = rank_watchlist_ml(items, candles_by_symbol, model_name, horizon, threshold, top_n)
+    return export_research_snapshot(
+        output_dir or resolve_dashboard_path(default_output_dir()),
+        screen_rows,
+        strategy_scores,
+        ai_candidates,
+        {
+            "watchlist": str(watchlist_path),
+            "strategy": strategy_name,
+            "model": model_name,
+            "horizon": horizon,
+            "threshold": threshold,
+            "top": top_n,
+            "initial_cash": initial_cash,
+        },
+    )
+
+
 def candles_to_chart_rows(candles: list[Candle]) -> list[dict]:
     return [
         {
@@ -446,6 +481,7 @@ def main() -> None:
         _render_ml_evaluation_tab(st, path, selected_label, selected_symbol, config)
     with tabs[6]:
         _render_ai_candidate_tab(st, path, config)
+        _render_export_research_button(st, path, config)
 
 
 def _render_css(st) -> None:
@@ -711,7 +747,27 @@ def _render_ai_candidate_tab(st, watchlist_path: str | Path, config: dict) -> No
     except Exception as exc:
         st.error(f"AI候选排序失败：{exc}")
 
+def _render_export_research_button(st, watchlist_path: str | Path, config: dict) -> None:
+    st.divider()
+    if st.button("导出当前研究结果", use_container_width=True):
+        try:
+            with st.spinner("正在导出研究结果..."):
+                summary = export_dashboard_research(
+                    watchlist_path,
+                    config["strategy_name"],
+                    config["ml_model"],
+                    config["ml_horizon"],
+                    config["ml_threshold"],
+                    config["score_top_n"],
+                    config["initial_cash"],
+                )
+            st.success(f"已导出到：{summary['output_dir']}")
+            st.json(summary)
+        except Exception as exc:
+            st.error(f"导出失败：{exc}")
 
+
+def _format_pct(value) -> str:
     if value is None:
         return "N/A"
     return f"{value:.2f}%"

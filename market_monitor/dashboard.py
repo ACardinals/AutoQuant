@@ -9,6 +9,7 @@ from market_monitor.data.akshare_a_share import download_a_share_watchlist, fetc
 from market_monitor.data.watchlist import WatchlistItem, load_watchlist, load_watchlist_candles, write_watchlist
 from market_monitor.evaluation import compare_strategies, compare_watchlist
 from market_monitor.ml.models import available_models
+from market_monitor.ml.prediction import rank_watchlist_ml
 from market_monitor.ml.validation import evaluate_time_series_model
 from market_monitor.models import Candle
 from market_monitor.signals.formatters import signal_with_metadata
@@ -232,6 +233,17 @@ def evaluate_symbol_ml(
     return evaluate_time_series_model(candles_by_symbol[symbol.upper()], model_name, horizon, splits, threshold)
 
 
+def rank_watchlist_ml_candidates(
+    watchlist_path: str | Path,
+    model_name: str,
+    horizon: int,
+    threshold: float,
+    top_n: int | None = 20,
+) -> list[dict]:
+    items, candles_by_symbol, _ = load_available_watchlist_candles(watchlist_path)
+    return rank_watchlist_ml(items, candles_by_symbol, model_name, horizon, threshold, top_n)
+
+
 def candles_to_chart_rows(candles: list[Candle]) -> list[dict]:
     return [
         {
@@ -394,7 +406,7 @@ def main() -> None:
     )
     _render_summary_metrics(st, rows, filtered_rows, config["strategy_name"], status)
 
-    tabs = st.tabs(["策略筛选", "个股K线", "回测分析", "策略对比", "股票池评分", "ML评估"])
+    tabs = st.tabs(["策略筛选", "个股K线", "回测分析", "策略对比", "股票池评分", "ML评估", "AI候选排序"])
     with tabs[0]:
         _render_screening_tab(st, filtered_rows)
         if filtered_rows:
@@ -432,27 +444,30 @@ def main() -> None:
         _render_watchlist_score_tab(st, path, config["initial_cash"], config["score_top_n"])
     with tabs[5]:
         _render_ml_evaluation_tab(st, path, selected_label, selected_symbol, config)
+    with tabs[6]:
+        _render_ai_candidate_tab(st, path, config)
 
 
 def _render_css(st) -> None:
     st.markdown(
         """
         <style>
-        .stApp {background: radial-gradient(circle at top left, #0f172a 0, #111827 34%, #020617 100%);}
-        .block-container {padding-top: 1.1rem; padding-bottom: 2rem; max-width: 1520px;}
-        .hero {padding: 24px 28px; border-radius: 24px; background: linear-gradient(135deg, rgba(14,165,233,.95), rgba(37,99,235,.88) 42%, rgba(15,23,42,.95)); color: white; margin-bottom: 20px; box-shadow: 0 18px 45px rgba(37,99,235,.28); border: 1px solid rgba(255,255,255,.18);}
-        .hero h1 {margin: 0; font-size: 2.25rem; letter-spacing: .04em;}
-        .hero p {margin: 10px 0 0 0; color: #dbeafe; font-size: 1rem;}
-        section[data-testid="stSidebar"] {background: linear-gradient(180deg, #020617 0%, #0f172a 100%); border-right: 1px solid rgba(148,163,184,.22);}
-        section[data-testid="stSidebar"] * {color: #e5e7eb;}
-        div[data-testid="stMetric"] {background: linear-gradient(180deg, rgba(15,23,42,.96), rgba(30,41,59,.92)); border: 1px solid rgba(56,189,248,.28); padding: 16px 18px; border-radius: 18px; box-shadow: 0 12px 32px rgba(2,6,23,.25);}
-        div[data-testid="stMetric"] label {color: #93c5fd !important;}
-        div[data-testid="stMetric"] [data-testid="stMetricValue"] {color: #f8fafc;}
-        .stButton > button {border-radius: 14px; border: 1px solid rgba(56,189,248,.55); background: linear-gradient(135deg, #0284c7, #2563eb); color: white; font-weight: 700; box-shadow: 0 8px 22px rgba(37,99,235,.35);}
-        .stButton > button:hover {border-color: #7dd3fc; filter: brightness(1.08);}
-        div[data-baseweb="select"] > div, div[data-baseweb="input"] > div {border-radius: 12px; border-color: rgba(56,189,248,.35);}
-        .section-note {color: #94a3b8; font-size: 0.92rem; margin-top: -8px; margin-bottom: 12px;}
-        h2, h3 {color: #e0f2fe;}
+        .stApp {background: #f8fafc; color: #0f172a;}
+        .block-container {padding-top: 1.2rem; padding-bottom: 2rem; max-width: 1520px;}
+        .hero {padding: 26px 30px; border-radius: 22px; background: linear-gradient(135deg, #ffffff 0%, #eff6ff 54%, #e0f2fe 100%); color: #0f172a; margin-bottom: 22px; box-shadow: 0 14px 36px rgba(15,23,42,.08); border: 1px solid #dbeafe;}
+        .hero h1 {margin: 0; font-size: 2.15rem; letter-spacing: .03em; color: #0f172a;}
+        .hero p {margin: 10px 0 0 0; color: #475569; font-size: 1rem;}
+        section[data-testid="stSidebar"] {background: #ffffff; border-right: 1px solid #e2e8f0; box-shadow: 8px 0 24px rgba(15,23,42,.04);}
+        section[data-testid="stSidebar"] * {color: #0f172a;}
+        div[data-testid="stMetric"] {background: #ffffff; border: 1px solid #e2e8f0; padding: 16px 18px; border-radius: 16px; box-shadow: 0 8px 24px rgba(15,23,42,.06);}
+        div[data-testid="stMetric"] label {color: #64748b !important;}
+        div[data-testid="stMetric"] [data-testid="stMetricValue"] {color: #0f172a;}
+        .stButton > button {border-radius: 12px; border: 1px solid #bfdbfe; background: #2563eb; color: white; font-weight: 700; box-shadow: 0 6px 16px rgba(37,99,235,.20);}
+        .stButton > button:hover {border-color: #2563eb; background: #1d4ed8; color: white;}
+        div[data-baseweb="select"] > div, div[data-baseweb="input"] > div {border-radius: 12px; border-color: #cbd5e1; background: #ffffff;}
+        div[data-testid="stDataFrame"] {border-radius: 16px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 10px 24px rgba(15,23,42,.05);}
+        .section-note {color: #64748b; font-size: 0.92rem; margin-top: -8px; margin-bottom: 12px;}
+        h1, h2, h3 {color: #0f172a;}
         </style>
         """,
         unsafe_allow_html=True,
@@ -676,7 +691,27 @@ def _render_ml_evaluation_tab(st, watchlist_path: str | Path, selected_label: st
         st.error(f"ML评估失败：{exc}")
 
 
-def _format_pct(value) -> str:
+def _render_ai_candidate_tab(st, watchlist_path: str | Path, config: dict) -> None:
+    st.subheader("AI候选排序")
+    st.markdown('<div class="section-note">对股票池逐个训练轻量ML baseline，并按最新上涨概率排序。</div>', unsafe_allow_html=True)
+    st.caption("该排序用于研究优先级，不构成交易建议。")
+    try:
+        with st.spinner("正在计算AI候选排序..."):
+            rows = rank_watchlist_ml_candidates(
+                watchlist_path,
+                config["ml_model"],
+                config["ml_horizon"],
+                config["ml_threshold"],
+                config["score_top_n"],
+            )
+        if rows:
+            st.dataframe(rows, use_container_width=True, height=560)
+        else:
+            st.info("没有可用候选。请确认行情数据充足，或调小ML预测周期。")
+    except Exception as exc:
+        st.error(f"AI候选排序失败：{exc}")
+
+
     if value is None:
         return "N/A"
     return f"{value:.2f}%"

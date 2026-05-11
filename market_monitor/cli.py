@@ -23,6 +23,7 @@ from market_monitor.evaluation import (
     format_watchlist_comparison_table,
 )
 from market_monitor.ml.models import available_models
+from market_monitor.ml.prediction import format_ml_rank_table, rank_watchlist_ml
 from market_monitor.ml.validation import evaluate_time_series_model, format_ml_evaluation_table
 from market_monitor.rl.baselines import available_policies, create_policy, evaluate_policy
 from market_monitor.rl.environment import TradingEnvironmentConfig, TradingEnvironmentPlaceholder
@@ -95,6 +96,14 @@ def main() -> None:
     ml_parser.add_argument("--threshold", type=float, default=0.0)
     ml_parser.add_argument("--format", choices=("json", "table"), default="json")
 
+    ml_rank_parser = subparsers.add_parser("ml-rank-watchlist", help="Rank watchlist candidates by latest ML up-probability")
+    ml_rank_parser.add_argument("--watchlist", required=True)
+    ml_rank_parser.add_argument("--model", choices=available_models(), default="hist_gradient_boosting")
+    ml_rank_parser.add_argument("--horizon", type=int, default=10)
+    ml_rank_parser.add_argument("--threshold", type=float, default=0.0)
+    ml_rank_parser.add_argument("--top", type=int, default=20)
+    ml_rank_parser.add_argument("--format", choices=("json", "table"), default="json")
+
     subparsers.add_parser("strategies", help="List available strategy names")
 
     rl_baseline_parser = subparsers.add_parser("rl-baseline", help="Evaluate a simple RL baseline policy on local CSV candles")
@@ -151,6 +160,15 @@ def main() -> None:
             print(format_ml_evaluation_table(result))
         else:
             print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
+    if args.command == "ml-rank-watchlist":
+        items, candles_by_symbol = load_watchlist_candles(args.watchlist)
+        rows = rank_watchlist_ml(items, candles_by_symbol, args.model, args.horizon, args.threshold, args.top)
+        if args.format == "table":
+            print(format_ml_rank_table(rows))
+        else:
+            print(json.dumps(rows, ensure_ascii=False, indent=2))
         return
 
     if args.command == "strategies":

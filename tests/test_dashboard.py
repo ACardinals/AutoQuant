@@ -14,6 +14,7 @@ from market_monitor.dashboard import (
     filter_watchlist_rows,
     flatten_screen_row,
     load_available_watchlist_candles,
+    rank_watchlist_ml_candidates,
     screen_rows,
     write_filtered_watchlist,
 )
@@ -24,7 +25,8 @@ def _write_candles(path, symbol, count=80):
     rows = ["timestamp,symbol,open,high,low,close,volume"]
     start = datetime(2024, 1, 1)
     for i in range(count):
-        price = 100 + i * 0.2 + (i % 5) * 0.1
+        cycle = i % 12
+        price = 100 + i * 0.08 + (cycle - 6) * 0.25
         day = start + timedelta(days=i)
         rows.append(f"{day:%Y-%m-%d}T00:00:00Z,{symbol},{price},{price + 1},{price - 1},{price},{100 + i * 3}")
     path.write_text("\n".join(rows), encoding="utf-8")
@@ -268,3 +270,19 @@ def test_evaluate_symbol_ml_returns_metrics(tmp_path):
     assert result["model"] == "logistic_regression"
     assert result["folds"]
     assert "accuracy" in result["metrics"]
+
+
+def test_rank_watchlist_ml_candidates_returns_candidates(tmp_path):
+    csv_path = tmp_path / "test.csv"
+    _write_candles(csv_path, "TEST", count=90)
+    watchlist_path = tmp_path / "watchlist.csv"
+    watchlist_path.write_text(
+        "symbol,name,market,csv\nTEST,Test Asset,unit,test.csv\n",
+        encoding="utf-8",
+    )
+
+    rows = rank_watchlist_ml_candidates(watchlist_path, "logistic_regression", horizon=5, threshold=0, top_n=5)
+
+    assert rows
+    assert rows[0]["symbol"] == "TEST"
+    assert "probability" in rows[0]

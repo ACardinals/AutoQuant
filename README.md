@@ -77,6 +77,17 @@ python -m market_monitor.cli compare-strategies \
   --format table
 ```
 
+Compare all strategies across a watchlist and rank strategy/symbol candidates with a research score:
+
+```bash
+python -m market_monitor.cli compare-watchlist \
+  --watchlist watchlists/a_share.csv \
+  --format table \
+  --top 10
+```
+
+The `score` field is a deterministic research ranking score based on return, drawdown, win rate, profit factor, average trade return, and trade-count sanity checks. It is only for prioritizing further research.
+
 Evaluate an RL baseline policy:
 
 ```bash

@@ -16,7 +16,12 @@ from market_monitor.data.watchlist import (
     load_watchlist_candles,
     sync_watchlist_paths,
 )
-from market_monitor.evaluation import compare_strategies, format_strategy_comparison_table
+from market_monitor.evaluation import (
+    compare_strategies,
+    compare_watchlist,
+    format_strategy_comparison_table,
+    format_watchlist_comparison_table,
+)
 from market_monitor.rl.baselines import available_policies, create_policy, evaluate_policy
 from market_monitor.rl.environment import TradingEnvironmentConfig, TradingEnvironmentPlaceholder
 from market_monitor.signals.formatters import format_signal_table, signal_with_metadata
@@ -72,6 +77,13 @@ def main() -> None:
     compare_parser.add_argument("--initial-cash", type=float, default=10_000.0)
     compare_parser.add_argument("--format", choices=("json", "table"), default="json")
 
+    watchlist_compare_parser = subparsers.add_parser("compare-watchlist", help="Compare strategies across a watchlist of local CSV candles")
+    watchlist_compare_parser.add_argument("--watchlist", required=True)
+    watchlist_compare_parser.add_argument("--strategy", action="append", help="Strategy name to include; repeat to compare a subset")
+    watchlist_compare_parser.add_argument("--initial-cash", type=float, default=10_000.0)
+    watchlist_compare_parser.add_argument("--format", choices=("json", "table"), default="json")
+    watchlist_compare_parser.add_argument("--top", type=int, help="Limit output to the top N rows")
+
     subparsers.add_parser("strategies", help="List available strategy names")
 
     rl_baseline_parser = subparsers.add_parser("rl-baseline", help="Evaluate a simple RL baseline policy on local CSV candles")
@@ -106,6 +118,17 @@ def main() -> None:
         rows = compare_strategies(candles, args.strategy, args.initial_cash)
         if args.format == "table":
             print(format_strategy_comparison_table(rows))
+        else:
+            print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return
+
+    if args.command == "compare-watchlist":
+        items, candles_by_symbol = load_watchlist_candles(args.watchlist)
+        rows = compare_watchlist(items, candles_by_symbol, args.strategy, args.initial_cash)
+        if args.top is not None:
+            rows = rows[: args.top]
+        if args.format == "table":
+            print(format_watchlist_comparison_table(rows))
         else:
             print(json.dumps(rows, ensure_ascii=False, indent=2))
         return

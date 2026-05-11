@@ -12,6 +12,7 @@ from market_monitor.ml.models import available_models
 from market_monitor.ml.prediction import rank_watchlist_ml
 from market_monitor.ml.validation import evaluate_time_series_model
 from market_monitor.research_export import default_output_dir, export_research_snapshot
+from market_monitor.research_review import review_research_snapshot
 from market_monitor.models import Candle
 from market_monitor.signals.formatters import signal_with_metadata
 from market_monitor.signals.screener import screen_watchlist
@@ -245,6 +246,20 @@ def rank_watchlist_ml_candidates(
     return rank_watchlist_ml(items, candles_by_symbol, model_name, horizon, threshold, top_n)
 
 
+def review_dashboard_snapshot(
+    snapshot_dir: str | Path,
+    data_dir: str | Path,
+    horizons: list[int],
+    threshold: float = 0.0,
+) -> dict:
+    return review_research_snapshot(
+        resolve_dashboard_path(snapshot_dir),
+        resolve_dashboard_path(data_dir),
+        horizons,
+        threshold,
+    )
+
+
 def export_dashboard_research(
     watchlist_path: str | Path,
     strategy_name: str,
@@ -441,7 +456,7 @@ def main() -> None:
     )
     _render_summary_metrics(st, rows, filtered_rows, config["strategy_name"], status)
 
-    tabs = st.tabs(["策略筛选", "个股K线", "回测分析", "策略对比", "股票池评分", "ML评估", "AI候选排序"])
+    tabs = st.tabs(["策略筛选", "个股K线", "回测分析", "策略对比", "股票池评分", "ML评估", "AI候选排序", "复盘分析"])
     with tabs[0]:
         _render_screening_tab(st, filtered_rows)
         if filtered_rows:
@@ -482,6 +497,8 @@ def main() -> None:
     with tabs[6]:
         _render_ai_candidate_tab(st, path, config)
         _render_export_research_button(st, path, config)
+    with tabs[7]:
+        _render_review_tab(st, config)
 
 
 def _render_css(st) -> None:
@@ -544,6 +561,8 @@ def _render_sidebar(st) -> dict:
         ml_horizon = st.number_input("ML预测周期", min_value=1, value=10, step=1)
         ml_splits = st.number_input("ML时间切分数", min_value=2, value=5, step=1)
         ml_threshold = st.number_input("ML收益阈值", value=0.0, step=0.005, format="%.4f")
+        review_snapshot_dir = st.text_input("复盘快照目录", value="research_outputs/test-run")
+        review_horizons = st.text_input("复盘周期", value="5,10,20")
 
         st.divider()
         if st.button("创建示例股票池", use_container_width=True):
@@ -584,6 +603,8 @@ def _render_sidebar(st) -> dict:
         "ml_horizon": int(ml_horizon),
         "ml_splits": int(ml_splits),
         "ml_threshold": ml_threshold,
+        "review_snapshot_dir": review_snapshot_dir,
+        "review_horizons": _parse_horizons(review_horizons),
     }
 
 
@@ -746,6 +767,33 @@ def _render_ai_candidate_tab(st, watchlist_path: str | Path, config: dict) -> No
             st.info("没有可用候选。请确认行情数据充足，或调小ML预测周期。")
     except Exception as exc:
         st.error(f"AI候选排序失败：{exc}")
+
+def _render_review_tab(st, config: dict) -> None:
+    st.subheader("复盘分析")
+    st.markdown('<div class="section-note">读取导出的AI候选快照，并用本地行情计算未来收益和命中率。</div>', unsafe_allow_html=True)
+    st.caption("如果快照日期已经是最新交易日，未来收益列会为空；等后续行情数据更新后再复盘。")
+    if st.button("运行复盘分析", use_container_width=True):
+        try:
+            with st.spinner("正在复盘研究快照..."):
+                result = review_dashboard_snapshot(
+                    config["review_snapshot_dir"],
+                    config["data_dir"],
+                    config["review_horizons"],
+                    config["ml_threshold"],
+                )
+            st.success(f"复盘结果已写入：{result['output_dir']}")
+            st.subheader("复盘摘要 / Summary")
+            st.json(result["summary"])
+            st.subheader("复盘明细 / Details")
+            st.dataframe(result["rows"], use_container_width=True, height=560)
+        except Exception as exc:
+            st.error(f"复盘失败：{exc}")
+
+
+def _parse_horizons(value: str) -> list[int]:
+    horizons = [int(item.strip()) for item in value.split(",") if item.strip()]
+    return horizons or [5, 10, 20]
+
 
 def _render_export_research_button(st, watchlist_path: str | Path, config: dict) -> None:
     st.divider()

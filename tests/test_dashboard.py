@@ -16,6 +16,7 @@ from market_monitor.dashboard import (
     flatten_screen_row,
     load_available_watchlist_candles,
     rank_watchlist_ml_candidates,
+    review_dashboard_snapshot,
     screen_rows,
     write_filtered_watchlist,
 )
@@ -312,3 +313,40 @@ def test_export_dashboard_research_writes_snapshot(tmp_path):
     assert (tmp_path / "exports" / "strategy_scores.csv").exists()
     assert (tmp_path / "exports" / "ai_candidates.csv").exists()
     assert summary["output_dir"].endswith("exports")
+
+
+def test_review_dashboard_snapshot_reads_export(tmp_path):
+    from market_monitor.data.csv_writer import write_candle_rows
+    from market_monitor.research_export import export_research_snapshot
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    rows = []
+    start = datetime(2024, 1, 1)
+    for index in range(30):
+        price = 100 + index
+        rows.append(
+            {
+                "date": (start + timedelta(days=index)).date().isoformat(),
+                "symbol": "TEST",
+                "open": price,
+                "high": price + 1,
+                "low": price - 1,
+                "close": price,
+                "volume": 1000,
+                "turnover": "",
+            }
+        )
+    write_candle_rows(data_dir / "TEST.csv", rows)
+    snapshot = tmp_path / "snapshot"
+    export_research_snapshot(
+        snapshot,
+        [],
+        [],
+        [{"symbol": "TEST", "probability": 0.7, "latest_date": "2024-01-10"}],
+        {},
+    )
+
+    result = review_dashboard_snapshot(snapshot, data_dir, [5], 0)
+
+    assert result["summary"]["reviewed_count"] == 1

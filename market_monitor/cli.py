@@ -26,6 +26,7 @@ from market_monitor.ml.models import available_models
 from market_monitor.ml.prediction import format_ml_rank_table, rank_watchlist_ml
 from market_monitor.ml.validation import evaluate_time_series_model, format_ml_evaluation_table
 from market_monitor.research_export import default_output_dir, export_research_snapshot
+from market_monitor.research_review import format_review_table, review_research_snapshot
 from market_monitor.rl.baselines import available_policies, create_policy, evaluate_policy
 from market_monitor.rl.environment import TradingEnvironmentConfig, TradingEnvironmentPlaceholder
 from market_monitor.signals.formatters import format_signal_table, signal_with_metadata
@@ -115,6 +116,14 @@ def main() -> None:
     export_parser.add_argument("--initial-cash", type=float, default=10_000.0)
     export_parser.add_argument("--output-dir")
 
+    review_parser = subparsers.add_parser("review-research", help="Review exported AI candidates against future local candle returns")
+    review_parser.add_argument("--snapshot-dir", required=True)
+    review_parser.add_argument("--data-dir", default="data/a_share")
+    review_parser.add_argument("--horizons", nargs="+", type=int, default=[5, 10, 20])
+    review_parser.add_argument("--threshold", type=float, default=0.0)
+    review_parser.add_argument("--output-dir")
+    review_parser.add_argument("--format", choices=("json", "table"), default="json")
+
     subparsers.add_parser("strategies", help="List available strategy names")
 
     rl_baseline_parser = subparsers.add_parser("rl-baseline", help="Evaluate a simple RL baseline policy on local CSV candles")
@@ -185,6 +194,14 @@ def main() -> None:
     if args.command == "export-research":
         summary = _export_research(args)
         print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return
+
+    if args.command == "review-research":
+        result = review_research_snapshot(args.snapshot_dir, args.data_dir, args.horizons, args.threshold, args.output_dir)
+        if args.format == "table":
+            print(format_review_table(result["rows"], args.horizons))
+        else:
+            print(json.dumps({key: value for key, value in result.items() if key != "rows"}, ensure_ascii=False, indent=2))
         return
 
     if args.command == "strategies":

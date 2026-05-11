@@ -29,6 +29,7 @@ from market_monitor.research_export import default_output_dir, export_research_s
 from market_monitor.research_review import format_review_table, review_research_snapshot
 from market_monitor.rl.baselines import available_policies, create_policy, evaluate_policy
 from market_monitor.rl.environment import TradingEnvironmentConfig, TradingEnvironmentPlaceholder
+from market_monitor.sector_analysis import format_sector_candidates_table, format_sector_table, score_sectors, top_symbols_by_sector
 from market_monitor.signals.formatters import format_signal_table, signal_with_metadata
 from market_monitor.signals.screener import screen_watchlist
 from market_monitor.strategies.registry import available_strategies, create_strategy
@@ -124,6 +125,16 @@ def main() -> None:
     review_parser.add_argument("--output-dir")
     review_parser.add_argument("--format", choices=("json", "table"), default="json")
 
+    sector_parser = subparsers.add_parser("sector-rank", help="Rank sectors using strategy scores and ML probabilities")
+    sector_parser.add_argument("--watchlist", required=True)
+    sector_parser.add_argument("--strategy", action="append", help="Strategy name to include; repeat to compare a subset")
+    sector_parser.add_argument("--model", choices=available_models(), default="hist_gradient_boosting")
+    sector_parser.add_argument("--horizon", type=int, default=10)
+    sector_parser.add_argument("--threshold", type=float, default=0.0)
+    sector_parser.add_argument("--top", type=int, default=5)
+    sector_parser.add_argument("--initial-cash", type=float, default=10_000.0)
+    sector_parser.add_argument("--format", choices=("json", "table"), default="json")
+
     subparsers.add_parser("strategies", help="List available strategy names")
 
     rl_baseline_parser = subparsers.add_parser("rl-baseline", help="Evaluate a simple RL baseline policy on local CSV candles")
@@ -204,6 +215,16 @@ def main() -> None:
             print(json.dumps({key: value for key, value in result.items() if key != "rows"}, ensure_ascii=False, indent=2))
         return
 
+    if args.command == "sector-rank":
+        result = _sector_rank(args)
+        if args.format == "table":
+            print(format_sector_table(result["sectors"]))
+            print()
+            print(format_sector_candidates_table(result["top_candidates"]))
+        else:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
     if args.command == "strategies":
         print(json.dumps(available_strategies(), ensure_ascii=False, indent=2))
         return
@@ -247,6 +268,22 @@ def main() -> None:
         }
         print(json.dumps(output, ensure_ascii=False, indent=2))
 
+
+def _sector_rank(args):
+    items, candles_by_symbol = load_watchlist_candles(args.watchlist)
+    strategy_rows = compare_watchlist(items, candles_by_symbol, args.strategy, args.initial_cash)
+    ai_rows = rank_watchlist_ml(items, candles_by_symbol, args.model, args.horizon, args.threshold, None)
+    return {
+        "sectors": score_sectors(strategy_rows, ai_rows),
+        "top_candidates": top_symbols_by_sector(strategy_rows, args.top),
+        "config": {
+            "watchlist": args.watchlist,
+            "model": args.model,
+            "horizon": args.horizon,
+            "threshold": args.threshold,
+            "top": args.top,
+        },
+    }
 
 def _export_research(args):
     items, candles_by_symbol = load_watchlist_candles(args.watchlist)

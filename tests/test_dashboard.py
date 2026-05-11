@@ -15,6 +15,7 @@ from market_monitor.dashboard import (
     filter_watchlist_rows,
     flatten_screen_row,
     load_available_watchlist_candles,
+    rank_sectors,
     rank_watchlist_ml_candidates,
     review_dashboard_snapshot,
     screen_rows,
@@ -313,6 +314,22 @@ def test_export_dashboard_research_writes_snapshot(tmp_path):
     assert (tmp_path / "exports" / "strategy_scores.csv").exists()
     assert (tmp_path / "exports" / "ai_candidates.csv").exists()
     assert summary["output_dir"].endswith("exports")
+
+
+def test_rank_sectors_returns_sector_scores(tmp_path):
+    csv_path = tmp_path / "test.csv"
+    _write_candles(csv_path, "TEST", count=90)
+    watchlist_path = tmp_path / "watchlist.csv"
+    watchlist_path.write_text(
+        "symbol,name,market,csv\nTEST,Test Asset,unit,test.csv\n",
+        encoding="utf-8",
+    )
+
+    result = rank_sectors(watchlist_path, 10_000, "logistic_regression", horizon=5, threshold=0, top_n=3)
+
+    assert result["sectors"]
+    assert result["sectors"][0]["sector"] == "unit"
+    assert result["top_candidates"]
 
 
 def test_review_dashboard_snapshot_reads_export(tmp_path):

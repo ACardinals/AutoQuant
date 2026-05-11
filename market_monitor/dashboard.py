@@ -14,6 +14,7 @@ from market_monitor.ml.validation import evaluate_time_series_model
 from market_monitor.research_export import default_output_dir, export_research_snapshot
 from market_monitor.research_review import review_research_snapshot
 from market_monitor.models import Candle
+from market_monitor.sector_analysis import score_sectors, top_symbols_by_sector
 from market_monitor.signals.formatters import signal_with_metadata
 from market_monitor.signals.screener import screen_watchlist
 from market_monitor.strategies.registry import available_strategies, create_strategy
@@ -246,6 +247,23 @@ def rank_watchlist_ml_candidates(
     return rank_watchlist_ml(items, candles_by_symbol, model_name, horizon, threshold, top_n)
 
 
+def rank_sectors(
+    watchlist_path: str | Path,
+    initial_cash: float,
+    model_name: str,
+    horizon: int,
+    threshold: float,
+    top_n: int = 5,
+) -> dict:
+    items, candles_by_symbol, _ = load_available_watchlist_candles(watchlist_path)
+    strategy_rows = compare_watchlist(items, candles_by_symbol, initial_cash=initial_cash)
+    ai_rows = rank_watchlist_ml(items, candles_by_symbol, model_name, horizon, threshold, None)
+    return {
+        "sectors": score_sectors(strategy_rows, ai_rows),
+        "top_candidates": top_symbols_by_sector(strategy_rows, top_n),
+    }
+
+
 def review_dashboard_snapshot(
     snapshot_dir: str | Path,
     data_dir: str | Path,
@@ -456,7 +474,7 @@ def main() -> None:
     )
     _render_summary_metrics(st, rows, filtered_rows, config["strategy_name"], status)
 
-    tabs = st.tabs(["策略筛选", "个股K线", "回测分析", "策略对比", "股票池评分", "ML评估", "AI候选排序", "复盘分析"])
+    tabs = st.tabs(["策略筛选", "个股K线", "回测分析", "策略对比", "股票池评分", "行业板块", "ML评估", "AI候选排序", "复盘分析"])
     with tabs[0]:
         _render_screening_tab(st, filtered_rows)
         if filtered_rows:
@@ -493,11 +511,13 @@ def main() -> None:
     with tabs[4]:
         _render_watchlist_score_tab(st, path, config["initial_cash"], config["score_top_n"])
     with tabs[5]:
-        _render_ml_evaluation_tab(st, path, selected_label, selected_symbol, config)
+        _render_sector_tab(st, path, config)
     with tabs[6]:
+        _render_ml_evaluation_tab(st, path, selected_label, selected_symbol, config)
+    with tabs[7]:
         _render_ai_candidate_tab(st, path, config)
         _render_export_research_button(st, path, config)
-    with tabs[7]:
+    with tabs[8]:
         _render_review_tab(st, config)
 
 
@@ -717,6 +737,27 @@ def _render_watchlist_score_tab(st, watchlist_path: str | Path, initial_cash: fl
         st.dataframe(rows, use_container_width=True, height=560)
     except Exception as exc:
         st.error(f"股票池评分失败：{exc}")
+
+
+def _render_sector_tab(st, watchlist_path: str | Path, config: dict) -> None:
+    st.subheader("行业板块评分")
+    st.markdown('<div class="section-note">基于股票池行业字段聚合策略score与ML概率，先看强势板块，再看板块内候选。</div>', unsafe_allow_html=True)
+    try:
+        with st.spinner("正在计算行业板块评分..."):
+            result = rank_sectors(
+                watchlist_path,
+                config["initial_cash"],
+                config["ml_model"],
+                config["ml_horizon"],
+                config["ml_threshold"],
+                config["score_top_n"],
+            )
+        st.subheader("行业排名 / Sector Ranking")
+        st.dataframe(result["sectors"], use_container_width=True, height=360)
+        st.subheader("行业内候选 / Top Candidates by Sector")
+        st.dataframe(result["top_candidates"], use_container_width=True, height=520)
+    except Exception as exc:
+        st.error(f"行业板块评分失败：{exc}")
 
 
 def _render_ml_evaluation_tab(st, watchlist_path: str | Path, selected_label: str, selected_symbol: str, config: dict) -> None:
